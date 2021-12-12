@@ -4,6 +4,7 @@ import os
 import random
 import sys
 import math
+import neat
 
 # ------------------------------------------------------------------------------------------------------- #
 # Init PyGame
@@ -57,6 +58,7 @@ class DinoSuck:
         self.vel = self.VEL
         self.box = pygame.Rect(self.X_POS, self.Y_POS, self.image.get_width(), self.image.get_height())
         self.step = 0
+        self.color = (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
     
     def update(self):
         if (self.state == "RUN"):
@@ -83,6 +85,9 @@ class DinoSuck:
 
     def draw(self, WIN):
         WIN.blit(self.image, (self.box.x, self.box.y))
+        pygame.draw.rect(WIN, self.color, (self.box.x, self.box.y, self.box.width, self.box.height), 2)
+        for c in cactuds:
+            pygame.draw.line(WIN, self.color, (self.box.x + 54, self.box.y + 12), c.box.center, 2)
 
 # ------------------------------------------------------------------------------------------------------- #
 # Cactud
@@ -96,7 +101,7 @@ class Cactud:
     def update(self):
         self.box.x -= speed
         if (self.box.x <= -self.box.width):
-            cactud.pop()
+            cactuds.pop()
     
     def draw(self, WIN):
         WIN.blit(self.image[self.type], self.box)
@@ -112,30 +117,48 @@ class LargeCactud(Cactud):
         self.box.y = 300
 
 # ------------------------------------------------------------------------------------------------------- #
-# Kill The Suck Dino
-def killDino(index):
+# Functions
+def killDino(index): # Kill the too suck dino
     dino.pop(index)
+    ge.pop(index)
+    nets.pop(index)
+
+def dist(a, b):
+    dx = a[0] - b[0]
+    dy = a[1] - b[1]
+    return math.sqrt(dx**2+dy**2) # Thank you google
 
 # ------------------------------------------------------------------------------------------------------- #
 # Main
-def main():
+high_score = 0
+def main(genomes, config):
     # Variable
-    global speed, x_bg, y_bg, score, high_score, dino, cactud
+    global speed, x_bg, y_bg, score, dino, cactuds, ge, nets
     clock = pygame.time.Clock()
-    dino = [DinoSuck()]
-    cactud = []
     score = 0
-    high_score = 0
+
+    dino = []
+    cactuds = []
+    ge = []
+    nets = []
 
     speed = 20
     x_bg = 0
     y_bg = 380
 
+    # Genomes
+    for g_id, g in genomes:
+        dino.append(DinoSuck())
+        ge.append(g)
+        net = neat.nn.FeedForwardNetwork.create(g, config)
+        nets.append(net)
+        g.fitness = 0
+
     # Functions
     def updateScore():
         global score, speed, high_score
-        score += 0.4
-        if (score % 40 == 0):
+        score += 1
+        if (math.floor(score % 100) == 0):
             speed += 1
         if (score > high_score):
             high_score = score
@@ -143,6 +166,16 @@ def main():
         textHighScore = FONT.render("High Score: " + str(math.floor(high_score)), True, (0, 0, 0))
         WIN.blit(textScore, (900, 20))
         WIN.blit(textHighScore, (825, 60))
+
+    def updateStats():
+        global dino, speed, ge
+        textAlive = FONT.render("Alive: " + str(len(dino)), True, (0, 0, 0))
+        textGen = FONT.render("Gen: " + str(pop.generation + 1), True, (0, 0, 0))
+        textSpeed = FONT.render("Speed: " + str(speed), True, (0, 0, 0))
+        WIN.blit(textAlive, (50, 20))
+        WIN.blit(textGen, (50, 60))
+        WIN.blit(textSpeed, (225, 20))
+
     
     def bg():
         global  x_bg, y_bg
@@ -172,34 +205,51 @@ def main():
 
         # Check Len Of Dino And Cactud
         if (len(dino) == 0):
+            if (pop.best_genome):
+                print(pop.best_genome)
             break
             
-        if (len(cactud) == 0):
+        if (len(cactuds) == 0):
             rand = random.randint(0, 1)
             if (rand == 0):
-                cactud.append(SmallCactud(CACTUS_SMALL, random.randint(0, 2)))
+                rand = random.randint(0, 5)
+                cactuds.append(SmallCactud(CACTUS_SMALL, random.randint(0, 2)))
             else:
-                cactud.append(SmallCactud(CACTUS_LARGE, random.randint(0, 2)))
+                cactuds.append(SmallCactud(CACTUS_LARGE, random.randint(0, 2)))
 
         # Cactud
-        for c in cactud:
+        for c in cactuds:
             c.update()
             c.draw(WIN)
             for i, d in enumerate(dino):
                 if d.box.colliderect(c.box):
+                    ge[i].fitness += 1
                     killDino(i)
         
-        # Game Test
+        # Ahhh
         for i, d in enumerate(dino):
-            if (pygame.key.get_pressed()[pygame.K_SPACE]):
+            output = nets[i].activate((d.box.y,
+                dist((d.box.x, d.box.y), c.box.midtop)
+            ))
+            if (output[0] > 0.5 and d.box.y == d.Y_POS):
                 d.state = "JUMP"
 
         # IDK
+        updateStats()
         updateScore()
         bg()
         clock.tick(30)
         pygame.display.update()
+# ------------------------------------------------------------------------------------------------------- #
+# Run
+def run(path):
+    global pop
+    config = neat.config.Config(neat.DefaultGenome, neat.DefaultReproduction, neat.DefaultSpeciesSet, neat.DefaultStagnation, path)
+    pop = neat.Population(config)
+    pop.run(main, 50)
 
 # ------------------------------------------------------------------------------------------------------- #
 if (__name__ == "__main__"):
-    main()
+    dir = os.path.dirname(__file__)
+    path = os.path.join(dir, "config.txt")
+    run(path)
